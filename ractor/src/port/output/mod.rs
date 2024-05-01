@@ -139,10 +139,24 @@ impl OutputPortSubscription {
         TReceiverMsg: Message,
     {
         let handle = crate::concurrency::spawn(async move {
-            while let Ok(Some(msg)) = port.recv().await {
-                if let Some(new_msg) = converter(msg) {
-                    if receiver.cast(new_msg).is_err() {
-                        // kill the subscription process, as the forwarding agent is stopped
+            loop {
+                    match port.recv().await {
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(l)) => {
+                        tracing::warn!("Output port is lagged, we've dropped ({l}) messages!");
+                    }
+                    Ok(Some(msg)) => {
+                        if let Some(new_msg) = converter(msg) {
+                            if receiver.cast(new_msg).is_err() {
+                                // kill the subscription process, as the forwarding agent is stopped
+                                return;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // skip this message
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        tracing::warn!("Subscription is dying due to closed channel!");
                         return;
                     }
                 }
